@@ -1,0 +1,261 @@
+# 現行 Android 連携の要点を抜き出した記録用 patch です。
+# 実運用では公開用リポジトリの基準コミットに合わせて再生成してください。
+
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+@@
+     sourceSets {
+         main {
+             // eval files as assets (nn.bin)
+             assets.srcDirs += ["$buildDir/generated/assets/yaneuraou"]
+             // engine binary as a native lib so it lands in an executable directory
+             jniLibs.srcDirs += ["$buildDir/generated/jniLibs"]
+         }
+     }
+ }
+
+ // Copy the engine binary into jniLibs so Android places it in nativeLibraryDir
+ // (which is mounted with exec permission, unlike /data/data).
+ tasks.register("copyYaneuraOuJniLibs", Copy) {
+     from("$projectRoot/vendor/yaneuraou/android/YaneuraOu_NNUE_arm64-v8a")
+     into("$buildDir/generated/jniLibs/arm64-v8a")
+     rename("YaneuraOu_NNUE_arm64-v8a", "libYaneuraOu.so")
+ }
+
+ // Copy eval files into assets
+ tasks.register("copyYaneuraOuAssets", Copy) {
+     from("$projectRoot/vendor/yaneuraou/eval") {
+         into("eval")
+     }
+     into("$buildDir/generated/assets/yaneuraou")
+ }
+
+ tasks.matching { it.name =~ /^merge.*Assets$/ }.configureEach {
+     dependsOn("copyYaneuraOuAssets")
+ }
+
+ tasks.matching { it.name == "generateReleaseLintVitalReportModel" }.configureEach {
+     dependsOn("copyYaneuraOuAssets")
+ }
+
+ tasks.matching { it.name == "lintVitalAnalyzeRelease" }.configureEach {
+     dependsOn("copyYaneuraOuAssets")
+ }
+
+ tasks.matching { it.name =~ /^merge.*JniLibFolders$/ }.configureEach {
+     dependsOn("copyYaneuraOuJniLibs")
+ }
+
+diff --git a/android/app/src/main/java/com/shimizuhikari/shogithinkingtraining/MainApplication.kt b/android/app/src/main/java/com/shimizuhikari/shogithinkingtraining/MainApplication.kt
+@@
+ import expo.modules.ApplicationLifecycleDispatcher
+ import expo.modules.ReactNativeHostWrapper
+ import com.shimizuhikari.shogithinkingtraining.yaneuraou.YaneuraOuEnginePackage
+
+ class MainApplication : Application(), ReactApplication {
+@@
+             PackageList(this).packages.apply {
+               add(YaneuraOuEnginePackage())
+             }
+@@
+ }
+
+diff --git a/android/app/src/main/java/com/shimizuhikari/shogithinkingtraining/yaneuraou/YaneuraOuEnginePackage.kt b/android/app/src/main/java/com/shimizuhikari/shogithinkingtraining/yaneuraou/YaneuraOuEnginePackage.kt
+new file mode 100644
+@@
++package com.shimizuhikari.shogithinkingtraining.yaneuraou
++
++import com.facebook.react.ReactPackage
++import com.facebook.react.bridge.NativeModule
++import com.facebook.react.bridge.ReactApplicationContext
++import com.facebook.react.uimanager.ViewManager
++
++class YaneuraOuEnginePackage : ReactPackage {
++  override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
++    return listOf(YaneuraOuEngineModule(reactContext))
++  }
++
++  override fun createViewManagers(
++    reactContext: ReactApplicationContext
++  ): List<ViewManager<*, *>> {
++    return emptyList()
++  }
++}
+
+diff --git a/android/app/src/main/java/com/shimizuhikari/shogithinkingtraining/yaneuraou/YaneuraOuEngineModule.kt b/android/app/src/main/java/com/shimizuhikari/shogithinkingtraining/yaneuraou/YaneuraOuEngineModule.kt
+new file mode 100644
+@@
++package com.shimizuhikari.shogithinkingtraining.yaneuraou
++
++import android.os.Build
++import com.facebook.react.bridge.Promise
++import com.facebook.react.bridge.ReactApplicationContext
++import com.facebook.react.bridge.ReactContextBaseJavaModule
++import com.facebook.react.bridge.ReactMethod
++import java.io.File
++import java.io.FileOutputStream
++import java.util.concurrent.Executors
++import java.util.concurrent.TimeUnit
++
++class YaneuraOuEngineModule(
++  reactContext: ReactApplicationContext
++) : ReactContextBaseJavaModule(reactContext) {
++
++  private val executor = Executors.newSingleThreadExecutor()
++
++  override fun getName(): String = "YaneuraOuEngine"
++
++  @ReactMethod
++  fun getBestMove(promise: Promise) {
++    enqueueAnalysis("position startpos", promise)
++  }
++
++  @ReactMethod
++  fun getBestMoveBySfen(positionSfen: String, promise: Promise) {
++    val trimmed = positionSfen.trim()
++    if (trimmed.isEmpty()) {
++      promise.resolve("ERROR: positionSfen is empty")
++      return
++    }
++
++    enqueueAnalysis("position sfen $trimmed", promise)
++  }
++
++  private fun enqueueAnalysis(positionCommand: String, promise: Promise) {
++    executor.execute {
++      val result = try {
++        runAnalysis(positionCommand)
++      } catch (t: Throwable) {
++        "ERROR: ${t.message ?: t.javaClass.simpleName}"
++      }
++      promise.resolve(result)
++    }
++  }
++
++  private fun runAnalysis(positionCommand: String): String {
++    ensureSupportedAbi()
++
++    val evalDir = prepareEvalFiles()
++    val engineFile = resolveEngineBinary()
++
++    val commands = listOf(
++      "usi",
++      "setoption name Threads value 1",
++      "setoption name USI_Hash value 16",
++      "setoption name MultiPV value 3",
++      "setoption name EvalDir value ${evalDir.absolutePath}",
++      "setoption name USI_OwnBook value false",
++      "isready",
++      positionCommand,
++      GO_COMMAND
++    )
++
++    val transcript = StringBuilder()
++    commands.forEach { transcript.append(">>> ").append(it).append('\n') }
++
++    val nativeLibDir = reactApplicationContext.applicationInfo.nativeLibraryDir
++
++    val processBuilder = ProcessBuilder(engineFile.absolutePath)
++      .directory(engineFile.parentFile)
++      .redirectErrorStream(true)
++    processBuilder.environment()["LD_LIBRARY_PATH"] = nativeLibDir
++    val process = processBuilder.start()
++
++    val writer = process.outputStream.bufferedWriter(Charsets.UTF_8)
++    val input = process.inputStream
++    val buffer = ByteArray(4096)
++    val deadline = System.currentTimeMillis() + ANALYSIS_TIMEOUT_MS
++
++    try {
++      commands.forEach {
++        writer.write(it)
++        writer.newLine()
++      }
++      writer.flush()
++
++      var sawBestmove = false
++      while (System.currentTimeMillis() < deadline) {
++        val available = input.available()
++        if (available > 0) {
++          val read = input.read(buffer, 0, minOf(buffer.size, available))
++          if (read > 0) {
++            transcript.append(String(buffer, 0, read, Charsets.UTF_8))
++            if (transcript.contains("\nbestmove ") || transcript.startsWith("bestmove ")) {
++              sawBestmove = true
++              break
++            }
++          }
++        } else if (!process.isAlive) {
++          break
++        } else {
++          Thread.sleep(POLL_INTERVAL_MS)
++        }
++      }
++
++      if (!sawBestmove) {
++        return "ERROR: bestmove not received\n$transcript"
++      }
++
++      writer.write("quit")
++      writer.newLine()
++      writer.flush()
++      process.waitFor(QUIT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
++
++      return transcript.toString()
++    } finally {
++      try {
++        writer.close()
++      } catch (_: Throwable) {
++      }
++      if (process.isAlive) {
++        process.destroy()
++        process.waitFor(500, TimeUnit.MILLISECONDS)
++      }
++      if (process.isAlive) {
++        process.destroyForcibly()
++      }
++    }
++  }
++
++  private fun resolveEngineBinary(): File {
++    val nativeLibDir = reactApplicationContext.applicationInfo.nativeLibraryDir
++    val engineFile = File(nativeLibDir, ENGINE_LIB_NAME)
++    if (!engineFile.exists()) {
++      throw IllegalStateException("Engine binary not found at ${engineFile.absolutePath}")
++    }
++    return engineFile
++  }
++
++  private fun prepareEvalFiles(): File {
++    val evalDir = File(reactApplicationContext.filesDir, "$RUNTIME_DIR_NAME/eval")
++    if (!evalDir.exists()) {
++      evalDir.mkdirs()
++    }
++
++    val nnFile = File(evalDir, "nn.bin")
++    if (!nnFile.exists() || nnFile.length() == 0L) {
++      reactApplicationContext.assets.open("eval/nn.bin").use { input ->
++        FileOutputStream(nnFile).use { output ->
++          input.copyTo(output)
++        }
++      }
++    }
++
++    return evalDir
++  }
++
++  private fun ensureSupportedAbi() {
++    if (!Build.SUPPORTED_64_BIT_ABIS.contains(SUPPORTED_ABI)) {
++      throw IllegalStateException("Unsupported ABI. Required $SUPPORTED_ABI, found ${Build.SUPPORTED_ABIS.joinToString()}")
++    }
++  }
++
++  companion object {
++    private const val ENGINE_LIB_NAME = "libYaneuraOu.so"
++    private const val GO_COMMAND = "go depth 10"
++    private const val RUNTIME_DIR_NAME = "yaneuraou"
++    private const val SUPPORTED_ABI = "arm64-v8a"
++    private const val ANALYSIS_TIMEOUT_MS = 30_000L
++    private const val QUIT_TIMEOUT_MS = 1_000L
++    private const val POLL_INTERVAL_MS = 25L
++  }
++}

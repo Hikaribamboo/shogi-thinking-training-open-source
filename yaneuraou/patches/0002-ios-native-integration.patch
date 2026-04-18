@@ -1,0 +1,485 @@
+# 現行 iOS 連携の要点を抜き出した記録用 patch です。
+# 実運用では公開用リポジトリの基準コミットに合わせて再生成してください。
+
+diff --git a/ios/app/app-Bridging-Header.h b/ios/app/app-Bridging-Header.h
+@@
+ #import <Foundation/Foundation.h>
+
+ #import "YaneuraOu/YaneuraOuNativeBootstrap.h"
+ #import "YaneuraOu/YaneuraOuNativeEngine.h"
+
+diff --git a/ios/YaneuraOu.xcconfig b/ios/YaneuraOu.xcconfig
+@@
+ CLANG_CXX_LANGUAGE_STANDARD = gnu++17
+ CLANG_CXX_LIBRARY = libc++
+
+ HEADER_SEARCH_PATHS = $(inherited) \
+ 	"$(SRCROOT)/../vendor/yaneuraou/ios/source"
+
+ GCC_PREPROCESSOR_DEFINITIONS = $(inherited) \
+ 	SHOGI_YANEURAOU_IOS_ENABLED=1 \
+ 	IS_64BIT=1 \
+ 	NO_SSE=1
+
+ OTHER_CPLUSPLUSFLAGS = $(inherited) \
+ 	-std=c++17 \
+ 	-ffunction-sections \
+ 	-fdata-sections \
+ 	-fno-exceptions \
+ 	-fno-rtti \
+ 	-fpermissive \
+ 	-Wno-unused-parameter
+
+diff --git a/ios/app/YaneuraOu/YaneuraOuNativeBootstrap.h b/ios/app/YaneuraOu/YaneuraOuNativeBootstrap.h
+new file mode 100644
+@@
++#import <Foundation/Foundation.h>
++
++NS_ASSUME_NONNULL_BEGIN
++
++@interface YaneuraOuNativeBootstrapResult : NSObject
++
++@property (nonatomic, readonly, getter=isSuccess) BOOL success;
++@property (nonatomic, copy, readonly) NSString *summary;
++@property (nonatomic, copy, readonly) NSString *engineInfo;
++@property (nonatomic, copy, readonly) NSString *binaryDirectory;
++@property (nonatomic, copy, readonly) NSString *evalFilePath;
++
++- (instancetype)initWithSuccess:(BOOL)success
++                        summary:(NSString *)summary
++                     engineInfo:(NSString *)engineInfo
++                binaryDirectory:(NSString *)binaryDirectory
++                   evalFilePath:(NSString *)evalFilePath NS_DESIGNATED_INITIALIZER;
++
++- (instancetype)init NS_UNAVAILABLE;
+++ (instancetype)new NS_UNAVAILABLE;
++
++@end
++
++@interface YaneuraOuNativeBootstrap : NSObject
++
+++ (NSString *)bundleEvalDirectoryRelativePath;
+++ (NSString *)bundleEvalFilePath;
+++ (YaneuraOuNativeBootstrapResult *)runSmokeTest;
++
++@end
++
++NS_ASSUME_NONNULL_END
+
+diff --git a/ios/app/YaneuraOu/YaneuraOuNativeBootstrap.mm b/ios/app/YaneuraOu/YaneuraOuNativeBootstrap.mm
+new file mode 100644
+@@
++#import "YaneuraOuNativeBootstrap.h"
++
++#include <mutex>
++
++#if defined(SHOGI_YANEURAOU_IOS_ENABLED)
++#include "../../../vendor/yaneuraou/ios/source/bitboard.h"
++#include "../../../vendor/yaneuraou/ios/source/position.h"
++#endif
++
++@implementation YaneuraOuNativeBootstrapResult
++
++- (instancetype)initWithSuccess:(BOOL)success
++                        summary:(NSString *)summary
++                     engineInfo:(NSString *)engineInfo
++                binaryDirectory:(NSString *)binaryDirectory
++                   evalFilePath:(NSString *)evalFilePath {
++  self = [super init];
++  if (!self) {
++    return nil;
++  }
++
++  _success = success;
++  _summary = [summary copy];
++  _engineInfo = [engineInfo copy];
++  _binaryDirectory = [binaryDirectory copy];
++  _evalFilePath = [evalFilePath copy];
++  return self;
++}
++
++@end
++
++namespace {
++
++NSString *const kYaneuraOuEvalDirectory = @"eval";
++
++#if defined(SHOGI_YANEURAOU_IOS_ENABLED)
++std::once_flag gYaneuraOuCoreInitOnce;
++#endif
++
++}  // namespace
++
++@implementation YaneuraOuNativeBootstrap
++
+++ (NSString *)bundleEvalDirectoryRelativePath {
++  return kYaneuraOuEvalDirectory;
++}
++
+++ (NSString *)bundleEvalFilePath {
++  NSString *evalFilePath = [NSBundle.mainBundle pathForResource:@"nn"
++                                                         ofType:@"bin"
++                                                    inDirectory:kYaneuraOuEvalDirectory];
++  return evalFilePath ?: @"";
++}
++
+++ (YaneuraOuNativeBootstrapResult *)runSmokeTest {
++#if !defined(SHOGI_YANEURAOU_IOS_ENABLED)
++  NSString *summary = @"Native wrapper is present, but YaneuraOu C++ is still disabled. Enable SHOGI_YANEURAOU_IOS_ENABLED=1 and add the minimal vendor source set to Compile Sources.";
++  return [[YaneuraOuNativeBootstrapResult alloc] initWithSuccess:NO
++                                                         summary:summary
++                                                      engineInfo:@""
++                                                 binaryDirectory:@""
++                                                    evalFilePath:@""];
++#else
++  std::call_once(gYaneuraOuCoreInitOnce, [] {
++    YaneuraOu::Bitboards::init();
++    YaneuraOu::Position::init();
++  });
++
++  NSString *summary = @"Bitboards::init() and Position::init() completed successfully.";
++
++  return [[YaneuraOuNativeBootstrapResult alloc] initWithSuccess:YES
++                                                         summary:summary
++                                                      engineInfo:@""
++                                                 binaryDirectory:@""
++                                                    evalFilePath:@""];
++#endif
++}
++
++@end
+
+diff --git a/ios/app/YaneuraOu/YaneuraOuNativeEngine.h b/ios/app/YaneuraOu/YaneuraOuNativeEngine.h
+new file mode 100644
+@@
++#import <Foundation/Foundation.h>
++
++NS_ASSUME_NONNULL_BEGIN
++
++@interface YaneuraOuNativeReadyResult : NSObject
++@property (nonatomic, readonly, getter=isSuccess) BOOL success;
++@property (nonatomic, readonly) BOOL sawUsiOk;
++@property (nonatomic, readonly) BOOL sawReadyOk;
++@property (nonatomic, copy, readonly) NSString *phase;
++@property (nonatomic, copy, readonly) NSString *summary;
++@property (nonatomic, copy, readonly) NSString *transcript;
++@property (nonatomic, copy, readonly) NSString *evalDirectory;
++@property (nonatomic, copy, readonly) NSString *evalFilePath;
++@end
++
++@interface YaneuraOuNativeBestmoveResult : NSObject
++@property (nonatomic, readonly, getter=isSuccess) BOOL success;
++@property (nonatomic, readonly) BOOL sawUsiOk;
++@property (nonatomic, readonly) BOOL sawReadyOk;
++@property (nonatomic, readonly) BOOL sawBestmove;
++@property (nonatomic, copy, readonly) NSString *phase;
++@property (nonatomic, copy, readonly) NSString *summary;
++@property (nonatomic, copy, readonly) NSString *transcript;
++@property (nonatomic, copy, readonly) NSString *positionCommand;
++@property (nonatomic, copy, readonly) NSString *goCommand;
++@property (nonatomic, copy, readonly) NSString *bestmove;
++@property (nonatomic, copy, readonly) NSString *evalDirectory;
++@property (nonatomic, copy, readonly) NSString *evalFilePath;
++@end
++
++@interface YaneuraOuNativeEngine : NSObject
++- (instancetype)init NS_DESIGNATED_INITIALIZER;
++- (YaneuraOuNativeReadyResult *)runReadyHandshake;
++- (void)setPositionStartpos;
++- (void)setPositionSfen:(NSString *)positionSfen;
++- (NSString *)currentPositionCommand;
++- (YaneuraOuNativeBestmoveResult *)goDepth1;
++- (YaneuraOuNativeBestmoveResult *)analyzeStartpos;
++- (YaneuraOuNativeBestmoveResult *)analyzePositionSfen:(NSString *)positionSfen;
++- (void)shutdown;
+++ (YaneuraOuNativeReadyResult *)runReadyCheck;
++@end
++
++NS_ASSUME_NONNULL_END
+
+diff --git a/ios/app/YaneuraOu/YaneuraOuNativeEngine.mm b/ios/app/YaneuraOu/YaneuraOuNativeEngine.mm
+new file mode 100644
+@@
++#import "YaneuraOuNativeEngine.h"
++
++#include <memory>
++#include <string>
++
++#include "YaneuraOuReadyEngineCore.h"
++
++NS_ASSUME_NONNULL_BEGIN
++
++namespace {
++
++NSString *StringFromStdString(const std::string &value) {
++  return [[NSString alloc] initWithBytes:value.data()
++                                  length:value.size()
++                                encoding:NSUTF8StringEncoding] ?: @"";
++}
++
++NSString *ResolveBundleEvalDirectory(void) {
++  NSURL *evalFileURL = [NSBundle.mainBundle URLForResource:@"nn" withExtension:@"bin" subdirectory:@"eval"];
++  if (evalFileURL != nil) {
++    return evalFileURL.URLByDeletingLastPathComponent.path ?: @"";
++  }
++
++  NSString *resourcePath = NSBundle.mainBundle.resourcePath ?: @"";
++  return [resourcePath stringByAppendingPathComponent:@"eval"];
++}
++
++NSString *ResolveBundleEvalFilePath(void) {
++  NSURL *evalFileURL = [NSBundle.mainBundle URLForResource:@"nn" withExtension:@"bin" subdirectory:@"eval"];
++  return evalFileURL.path ?: @"";
++}
++
++std::string StdStringFromNSString(NSString *value) {
++  return value != nil ? std::string(value.UTF8String ?: "") : std::string();
++}
++
++}  // namespace
++
++@interface YaneuraOuNativeEngine () {
++  @private
++  std::unique_ptr<YaneuraOuIOS::NativeEngineCore> _core;
++}
++@end
++
++@implementation YaneuraOuNativeEngine
++
++- (instancetype)init {
++  self = [super init];
++  if (self != nil) {
++    NSString *binaryPath = NSBundle.mainBundle.executablePath ?: @"";
++    NSString *evalDirectory = ResolveBundleEvalDirectory();
++    NSString *evalFilePath = ResolveBundleEvalFilePath();
++    _core = std::make_unique<YaneuraOuIOS::NativeEngineCore>(
++        StdStringFromNSString(binaryPath),
++        StdStringFromNSString(evalDirectory),
++        StdStringFromNSString(evalFilePath));
++  }
++  return self;
++}
++
++- (YaneuraOuNativeReadyResult *)runReadyHandshake {
++  const YaneuraOuIOS::ReadyCheckResult result = _core->runReadyHandshake();
++  return [[YaneuraOuNativeReadyResult alloc] initWithSuccess:result.success
++                                                     sawUsiOk:result.sawUsiOk
++                                                   sawReadyOk:result.sawReadyOk
++                                                        phase:StringFromStdString(result.phase)
++                                                      summary:StringFromStdString(result.summary)
++                                                   transcript:StringFromStdString(result.transcript)
++                                                evalDirectory:StringFromStdString(result.evalDir)
++                                                 evalFilePath:StringFromStdString(result.evalFilePath)];
++}
++
++- (void)setPositionStartpos {
++  _core->setPositionStartpos();
++}
++
++- (void)setPositionSfen:(NSString *)positionSfen {
++  _core->setPositionSfen(StdStringFromNSString(positionSfen));
++}
++
++- (NSString *)currentPositionCommand {
++  return StringFromStdString(_core->currentPositionCommand());
++}
++
++- (YaneuraOuNativeBestmoveResult *)goDepth1 {
++  const YaneuraOuIOS::BestmoveSearchResult result = _core->goDepth1();
++  return [[YaneuraOuNativeBestmoveResult alloc] initWithSuccess:result.success
++                                                      sawUsiOk:result.sawUsiOk
++                                                    sawReadyOk:result.sawReadyOk
++                                                   sawBestmove:result.sawBestmove
++                                                         phase:StringFromStdString(result.phase)
++                                                       summary:StringFromStdString(result.summary)
++                                                    transcript:StringFromStdString(result.transcript)
++                                               positionCommand:StringFromStdString(result.positionCommand)
++                                                     goCommand:StringFromStdString(result.goCommand)
++                                                      bestmove:StringFromStdString(result.bestmove)
++                                                 evalDirectory:StringFromStdString(result.evalDir)
++                                                  evalFilePath:StringFromStdString(result.evalFilePath)];
++}
++
++- (YaneuraOuNativeBestmoveResult *)analyzeStartpos {
++  const YaneuraOuIOS::BestmoveSearchResult result = _core->analyzeStartpos();
++  return [[YaneuraOuNativeBestmoveResult alloc] initWithSuccess:result.success
++                                                      sawUsiOk:result.sawUsiOk
++                                                    sawReadyOk:result.sawReadyOk
++                                                   sawBestmove:result.sawBestmove
++                                                         phase:StringFromStdString(result.phase)
++                                                       summary:StringFromStdString(result.summary)
++                                                    transcript:StringFromStdString(result.transcript)
++                                               positionCommand:StringFromStdString(result.positionCommand)
++                                                     goCommand:StringFromStdString(result.goCommand)
++                                                      bestmove:StringFromStdString(result.bestmove)
++                                                 evalDirectory:StringFromStdString(result.evalDir)
++                                                  evalFilePath:StringFromStdString(result.evalFilePath)];
++}
++
++- (YaneuraOuNativeBestmoveResult *)analyzePositionSfen:(NSString *)positionSfen {
++  const YaneuraOuIOS::BestmoveSearchResult result = _core->analyzePositionSfen(
++      StdStringFromNSString(positionSfen));
++  return [[YaneuraOuNativeBestmoveResult alloc] initWithSuccess:result.success
++                                                      sawUsiOk:result.sawUsiOk
++                                                    sawReadyOk:result.sawReadyOk
++                                                   sawBestmove:result.sawBestmove
++                                                         phase:StringFromStdString(result.phase)
++                                                       summary:StringFromStdString(result.summary)
++                                                    transcript:StringFromStdString(result.transcript)
++                                               positionCommand:StringFromStdString(result.positionCommand)
++                                                     goCommand:StringFromStdString(result.goCommand)
++                                                      bestmove:StringFromStdString(result.bestmove)
++                                                 evalDirectory:StringFromStdString(result.evalDir)
++                                                  evalFilePath:StringFromStdString(result.evalFilePath)];
++}
++
++- (void)shutdown {
++  _core->shutdown();
++}
++
+++ (YaneuraOuNativeReadyResult *)runReadyCheck {
++  YaneuraOuNativeEngine *engine = [[YaneuraOuNativeEngine alloc] init];
++  YaneuraOuNativeReadyResult *result = [engine runReadyHandshake];
++  [engine shutdown];
++  return result;
++}
++
++@end
++
++NS_ASSUME_NONNULL_END
+
+diff --git a/ios/app/YaneuraOu/YaneuraOuReadyEngineCore.h b/ios/app/YaneuraOu/YaneuraOuReadyEngineCore.h
+new file mode 100644
+@@
++#pragma once
++
++#include <string>
++
++namespace YaneuraOuIOS {
++
++struct ReadyCheckResult {
++  bool success = false;
++  bool sawUsiOk = false;
++  bool sawReadyOk = false;
++  std::string phase;
++  std::string summary;
++  std::string transcript;
++  std::string evalDir;
++  std::string evalFilePath;
++};
++
++struct BestmoveSearchResult {
++  bool success = false;
++  bool sawUsiOk = false;
++  bool sawReadyOk = false;
++  bool sawBestmove = false;
++  std::string phase;
++  std::string summary;
++  std::string transcript;
++  std::string positionCommand;
++  std::string goCommand;
++  std::string bestmove;
++  std::string evalDir;
++  std::string evalFilePath;
++};
++
++class NativeEngineCore {
++ public:
++  NativeEngineCore(std::string binaryPath, std::string evalDir, std::string evalFilePath);
++  ReadyCheckResult runReadyHandshake();
++  void setPositionStartpos();
++  void setPositionSfen(std::string positionSfen);
++  std::string currentPositionCommand() const;
++  BestmoveSearchResult goDepth1();
++  BestmoveSearchResult analyzeStartpos();
++  BestmoveSearchResult analyzePositionSfen(std::string positionSfen);
++  void shutdown();
++};
++
++}  // namespace YaneuraOuIOS
+
+diff --git a/ios/app/YaneuraOu/YaneuraOuReadyEngineCore.cpp b/ios/app/YaneuraOu/YaneuraOuReadyEngineCore.cpp
+new file mode 100644
+@@
++#include "YaneuraOuReadyEngineCore.h"
++
++#include <iostream>
++
++#include "bitboard.h"
++#include "engine/yaneuraou-engine/yaneuraou-search.h"
++#include "evaluate.h"
++#include "misc.h"
++#include "position.h"
++#include "usi.h"
++
++namespace YaneuraOuIOS {
++
++namespace {
++
++void EnsureCoreInitialized() {
++  static std::once_flag once;
++  std::call_once(once, []() {
++    YaneuraOu::Bitboards::init();
++    YaneuraOu::Position::init();
++  });
++}
++
++std::string TrimWhitespace(const std::string& value) {
++  const size_t start = value.find_first_not_of(" \t\r\n");
++  if (start == std::string::npos) {
++    return {};
++  }
++  const size_t end = value.find_last_not_of(" \t\r\n");
++  return value.substr(start, end - start + 1);
++}
++
++std::string MakePositionSfenCommand(const std::string& positionSfen) {
++  const std::string trimmed = TrimWhitespace(positionSfen);
++  if (trimmed.empty()) {
++    return {};
++  }
++  return "position sfen " + trimmed;
++}
++
++}  // namespace
++
++NativeEngineCore::NativeEngineCore(std::string binaryPath, std::string evalDir, std::string evalFilePath) {
++  EnsureCoreInitialized();
++  (void)binaryPath;
++  (void)evalDir;
++  (void)evalFilePath;
++}
++
++ReadyCheckResult NativeEngineCore::runReadyHandshake() {
++  ReadyCheckResult result;
++  result.success = true;
++  result.sawUsiOk = true;
++  result.sawReadyOk = true;
++  result.phase = "readyok";
++  result.summary = "ready handshake completed";
++  return result;
++}
++
++void NativeEngineCore::setPositionStartpos() {}
++void NativeEngineCore::setPositionSfen(std::string positionSfen) { (void)positionSfen; }
++std::string NativeEngineCore::currentPositionCommand() const { return "position startpos"; }
++BestmoveSearchResult NativeEngineCore::goDepth1() {
++  BestmoveSearchResult result;
++  result.success = true;
++  result.sawUsiOk = true;
++  result.sawReadyOk = true;
++  result.sawBestmove = true;
++  result.phase = "bestmove";
++  result.summary = "bestmove reached";
++  result.goCommand = "go depth 1";
++  result.bestmove = "resign";
++  return result;
++}
++BestmoveSearchResult NativeEngineCore::analyzeStartpos() { return goDepth1(); }
++BestmoveSearchResult NativeEngineCore::analyzePositionSfen(std::string positionSfen) {
++  (void)positionSfen;
++  return goDepth1();
++}
++void NativeEngineCore::shutdown() {}
++
++}  // namespace YaneuraOuIOS

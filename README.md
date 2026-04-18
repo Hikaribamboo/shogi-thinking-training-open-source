@@ -1,43 +1,27 @@
-# shogi-thinking-training-open-source
+# 公開義務対応パッケージ
 
-このリポジトリは，将棋次の一手トレで利用しているオープンソースソフトウェアに関する公開用リポジトリです。
+このディレクトリは，YaneuraOu 関連の公開義務対応をこのリポジトリ内で先に整えるための作業置き場です。
+後で `shogi-thinking-training-open-source` にそのまま移しやすいように，公開対象と対象外を分けています。
 
-主に，YaneuraOu を利用する部分について，対応するソースコード，変更内容，ビルド情報，および補足資料を整理して公開することを目的としています。
+## 完成版
 
-## このリポジトリに含めるもの
+- `docs/source-offer.md`
+- `yaneuraou/build/android.md`
+- `yaneuraou/build/ios.md`
+- `yaneuraou/notices/app-version-map.md`
+- `yaneuraou/notices/android-verification.md`
+- `yaneuraou/notices/ios-verification.md`
 
-- YaneuraOu の upstream source
-- 本プロジェクトで加えた変更差分
-- Android / iOS 向けのビルドメモ
-- アプリ版とソース状態の対応メモ
-- ソース公開に関する案内文書
+## 暫定版
 
-## このリポジトリに含めないもの
+- `LICENSES/GPL-3.0.txt`
+- `yaneuraou/patches/*.patch`
+- `yaneuraou/upstream/source/`
+- `yaneuraou/upstream/jni/`
 
-- アプリ本体の全ソースコード
-- 利用規約やプライバシーポリシー
-- ビルド生成物一式
-- 一時ファイルや検証用の出力物
+## 移設時の方針
 
-## 現在の公開対象
-
-現時点では，YaneuraOu 関連のソース公開と，その組み込みに関する情報整理を中心に扱います。
-
-## ディレクトリ構成
-
-- `LICENSES/`
-  - 利用しているオープンソースライセンス文書
-- `yaneuraou/upstream/`
-  - YaneuraOu の元ソース
-- `yaneuraou/patches/`
-  - 本プロジェクトで加えた変更差分
-- `yaneuraou/build/`
-  - Android / iOS のビルドメモ
-- `yaneuraou/notices/`
-  - アプリ版との対応関係メモ
-- `docs/`
-  - ソース公開に関する補足文書
-
-## 備考
-
-このリポジトリは，必要に応じて内容を更新します。
+- iOS の公開対象ソースは `vendor/yaneuraou/ios/source/` を `yaneuraou/upstream/source/` に丸ごとコピーします。
+- Android は現時点で C++ ソースの公開物がなく，`vendor/yaneuraou/android/` にある arm64-v8a の実行用成果物を `yaneuraou/upstream/jni/` に置きます。
+- `nn.bin` はライセンス確認が必要な可能性があるため，自動的には公開対象に含めません。
+- 利用規約とプライバシーポリシーはこの配下の対象外です。

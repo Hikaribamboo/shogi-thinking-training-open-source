@@ -1,0 +1,10 @@
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+このファイルは GPL-3.0 の参照用プレースホルダです。
+公開前には GNU 公式の全文を同梱してください。
+
+公式本文:
+https://www.gnu.org/licenses/gpl-3.0.txt
+
+このリポジトリの YaneuraOu 関連公開物は，少なくとも GPL-3.0-or-later を前提に整理しています。

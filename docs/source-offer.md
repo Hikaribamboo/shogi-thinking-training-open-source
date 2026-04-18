@@ -3,6 +3,10 @@
 この文書は，YaneuraOu 関連の公開義務対応として提供する内容を定義したものです。
 このリポジトリを公開パッケージとして扱い，公開対象と対象外を明確にします。
 
+## 公開リポジトリ
+
+- https://github.com/Hikaribamboo/shogi-thinking-training-open-source.git
+
 ## 対象
 
 - Android の native 連携

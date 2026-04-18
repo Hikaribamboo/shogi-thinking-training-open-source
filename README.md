@@ -1,9 +1,9 @@
 # 公開義務対応パッケージ
 
-このディレクトリは，YaneuraOu 関連の公開義務対応をこのリポジトリ内で先に整えるための作業置き場です。
-後で `shogi-thinking-training-open-source` にそのまま移しやすいように，公開対象と対象外を分けています。
+このリポジトリは，YaneuraOu 関連の公開義務に対応するための公開パッケージです。
+本 README に記載するファイルを，公開対象として提供します。
 
-## 完成版
+## 公開ドキュメント
 
 - `docs/source-offer.md`
 - `yaneuraou/build/android.md`
@@ -12,16 +12,16 @@
 - `yaneuraou/notices/android-verification.md`
 - `yaneuraou/notices/ios-verification.md`
 
-## 暫定版
+## 公開ソース・ライセンス
 
 - `LICENSES/GPL-3.0.txt`
 - `yaneuraou/patches/*.patch`
 - `yaneuraou/upstream/source/`
 - `yaneuraou/upstream/jni/`
 
-## 移設時の方針
+## 提供方針
 
-- iOS の公開対象ソースは `vendor/yaneuraou/ios/source/` を `yaneuraou/upstream/source/` に丸ごとコピーします。
-- Android は現時点で C++ ソースの公開物がなく，`vendor/yaneuraou/android/` にある arm64-v8a の実行用成果物を `yaneuraou/upstream/jni/` に置きます。
+- iOS 向けの公開対象ソースは `yaneuraou/upstream/source/` に収録します。
+- Android 向けは公開対象の成果物を `yaneuraou/upstream/jni/` に収録します。
 - `nn.bin` はライセンス確認が必要な可能性があるため，自動的には公開対象に含めません。
-- 利用規約とプライバシーポリシーはこの配下の対象外です。
+- 利用規約とプライバシーポリシーはこのリポジトリの公開対象外です。
